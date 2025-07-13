@@ -1,0 +1,68 @@
+//@version=5
+strategy("DXH Narrow LP IL Backtest (Improved Avg Price)", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// === Parameters ===
+initial_capital = input.float(10000, "Initial Capital ($)")
+band_pct = input.float(3, "LP Range (%)") / 100
+rebalance_fixed_cost = input.float(10, "Rebalance Fixed Cost ($)")
+rebalance_pct_cost = input.float(0.1, "Rebalance Percent Cost (%)") / 100
+
+// === State Variables ===
+var float mid_price = close
+var float btc = initial_capital / 2 / close
+var float usdc = initial_capital / 2
+var float portfolio_value = initial_capital
+
+// === Compute Boundaries ===
+lower_bound = mid_price * (1 - band_pct)
+upper_bound = mid_price * (1 + band_pct)
+price_outside = (close < lower_bound) or (close > upper_bound)
+
+if price_outside
+    // === Compute average price between mid and current ===
+    avg_price = (mid_price + close) / 2
+
+    // === Convert holdings to single asset ===
+    if close > upper_bound
+        // 价格上穿：BTC换成USDC
+        usdc += btc * avg_price
+        btc := 0
+    else if close < lower_bound
+        // 价格下穿：USDC换成BTC
+        btc += usdc / avg_price
+        usdc := 0
+
+    // === Rebalance to 50/50 ===
+    total_value = btc * avg_price + usdc
+    cost = rebalance_fixed_cost + rebalance_pct_cost * total_value
+    total_value -= cost
+
+    btc := total_value / 2 / avg_price
+    usdc := total_value / 2
+    portfolio_value := total_value
+
+    // Update mid_price
+    mid_price := avg_price
+
+    // Log event
+    label.new(bar_index, high, 
+      "Rebalance:\nAvg Price = " + str.tostring(avg_price, format.mintick) +
+      "\nCost = $" + str.tostring(cost, format.mintick) +
+      "\nNew Value = $" + str.tostring(portfolio_value, format.mintick),
+      color=color.red, style=label.style_label_left, textcolor=color.white, size=size.normal)
+
+// === Recompute boundaries ===
+lower_bound := mid_price * (1 - band_pct)
+upper_bound := mid_price * (1 + band_pct)
+
+// === Plot Range ===
+plot(lower_bound, color=color.green, title="Lower Bound")
+plot(upper_bound, color=color.green, title="Upper Bound")
+
+// === Show equity curve ===
+//strategy.equity
+
+// === Dummy entries to force Strategy Report ===
+if price_outside
+    strategy.close_all()
+    strategy.entry("Dummy", strategy.long, qty=1)
